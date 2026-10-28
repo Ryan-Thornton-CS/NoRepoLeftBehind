@@ -1,20 +1,25 @@
+"""Emit metadata logs and explicitly enabled, bounded, redacted content traces."""
+
 import json
 import logging
 from logging.handlers import RotatingFileHandler
 from typing import Any
 
-from .config import Settings
+from norepoleftbehind.configuration.models import Settings
 
 
 class Diagnostics:
+    """Own metadata events and optional bounded, redacted rotating content logs."""
+
     def __init__(self, settings: Settings) -> None:
+        """Configure metadata logging and create trace files only when explicitly enabled."""
         self.config = settings.diagnostics
-        self.logger = logging.getLogger("llm_tool_bridge.metadata")
+        self.logger = logging.getLogger("norepoleftbehind.metadata")
         self.trace: logging.Logger | None = None
         if self.config.content_traces:
             directory = self.config.trace_directory
             directory.mkdir(mode=0o700, parents=True, exist_ok=True)
-            self.trace = logging.Logger(f"llm_tool_bridge.trace.{id(self)}")
+            self.trace = logging.Logger(f"norepoleftbehind.trace.{id(self)}")
             handler = RotatingFileHandler(
                 directory / "content.jsonl",
                 maxBytes=self.config.trace_max_bytes,
@@ -25,9 +30,13 @@ class Diagnostics:
             self.trace.setLevel(logging.INFO)
 
     def record(self, event: str, **metadata: Any) -> None:
+        """Log explicitly supplied non-sensitive event metadata as a JSON record."""
         self.logger.info(json.dumps({"event": event, **metadata}))
 
     def content(self, *, redact_values: list[str] | None = None, **values: Any) -> None:
+        """Truncate selected content, redact incoming secret/header values, and enforce the trace
+        cap.
+        """
         if self.trace:
             # Only explicitly selected content strings; never bodies, headers, or credentials.
             record = {
@@ -49,6 +58,7 @@ class Diagnostics:
                 self.trace.info(encoded)
 
     def close(self) -> None:
+        """Close trace handlers; repeated calls are harmless."""
         if self.trace:
             for handler in self.trace.handlers[:]:
                 handler.close()

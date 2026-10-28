@@ -1,5 +1,6 @@
 import inspect
 import json
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -9,8 +10,8 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from openai import AsyncOpenAI
 
-from llm_tool_bridge.app import create_app
-from llm_tool_bridge.config import Settings
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.configuration.models import Settings
 
 TOOLS = [
     {
@@ -137,7 +138,7 @@ def request_body() -> dict[str, Any]:
             {"role": "system", "content": "Use the file tool when needed."},
             {"role": "user", "content": "Read README.md"},
         ],
-        "tools": TOOLS,
+        "tools": deepcopy(TOOLS),
     }
 
 

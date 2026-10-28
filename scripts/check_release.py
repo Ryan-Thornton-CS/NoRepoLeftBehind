@@ -2,7 +2,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from llm_tool_bridge import __version__
+from norepoleftbehind import __version__
 
 version = tomllib.loads(Path("pyproject.toml").read_text())["project"]["version"]
 if len(sys.argv) != 2 or sys.argv[1] != f"v{version}" or __version__ != version:

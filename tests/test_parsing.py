@@ -2,11 +2,11 @@ import json
 
 import pytest
 
-from llm_tool_bridge.config import Parsing, Settings
-from llm_tool_bridge.errors import BridgeError, ParseFailure
-from llm_tool_bridge.parsing import parse_output
-from llm_tool_bridge.prompts import correction_body
-from llm_tool_bridge.protocol import ToolPolicy
+from norepoleftbehind.configuration.models import Parsing, Settings
+from norepoleftbehind.protocol.chat import ToolPolicy
+from norepoleftbehind.protocol.errors import BridgeError, ParseFailure
+from norepoleftbehind.translation.parsing import parse_output
+from norepoleftbehind.translation.prompts import correction_body
 
 from .conftest import TOOLS, envelope
 

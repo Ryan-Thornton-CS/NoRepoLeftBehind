@@ -27,16 +27,24 @@ jobs:
       - run: uv run mypy
       - run: uv run pytest
       - run: uv build
+      - name: Verify complete-source release packages
+        run: uv run python scripts/package_release.py
       - name: Check built wheel in a fresh environment
         run: |
           uv venv /tmp/bridge-wheel
           uv pip install --python /tmp/bridge-wheel/bin/python dist/*.whl
-          /tmp/bridge-wheel/bin/llm-tool-bridge --version
-          /tmp/bridge-wheel/bin/llm-tool-bridge validate --config examples/bridge.yaml
-          /tmp/bridge-wheel/bin/llm-tool-bridge diagnostics
-          uv run python scripts/smoke_install.py /tmp/bridge-wheel/bin/llm-tool-bridge
+          /tmp/bridge-wheel/bin/norepoleftbehind --version
+          /tmp/bridge-wheel/bin/norepoleftbehind validate --config examples/bridge.yaml
+          /tmp/bridge-wheel/bin/norepoleftbehind diagnostics
+          uv run python scripts/smoke_install.py /tmp/bridge-wheel/bin/norepoleftbehind
       - name: Check source distribution
         run: |
           uv venv /tmp/bridge-sdist
           uv pip install --python /tmp/bridge-sdist/bin/python dist/*.tar.gz
-          /tmp/bridge-sdist/bin/llm-tool-bridge diagnostics
+          /tmp/bridge-sdist/bin/norepoleftbehind diagnostics
+          uv run python scripts/smoke_install.py /tmp/bridge-sdist/bin/norepoleftbehind
+      - name: Check complete source ZIP
+        run: |
+          unzip -q dist/release/v*/NoRepoLeftBehind-*.zip -d /tmp/bridge-bundle
+          cd /tmp/bridge-bundle/NoRepoLeftBehind-*
+          sha256sum -c SHA256SUMS

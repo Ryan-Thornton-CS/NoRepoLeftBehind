@@ -1,3 +1,5 @@
+"""Recognize supported tool envelopes and validate every call before returning any action."""
+
 import json
 import math
 import re
@@ -6,16 +8,18 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
-from .config import Parsing
-from .errors import ParseFailure
-from .protocol import Parsed, ToolPolicy
+from norepoleftbehind.configuration.models import Parsing
+from norepoleftbehind.protocol.chat import Parsed, ToolPolicy
+from norepoleftbehind.protocol.errors import ParseFailure
 
 
 def _reject_constant(value: str) -> None:
+    """Reject non-JSON numeric spellings such as NaN and Infinity."""
     raise ValueError(f"Non-JSON numeric constant: {value}")
 
 
 def _finite_float(value: str) -> float:
+    """Decode a numeric token only when its floating-point representation is finite."""
     number = float(value)
     if not math.isfinite(number):
         raise ValueError("JSON number exceeds finite floating-point range")
@@ -23,6 +27,7 @@ def _finite_float(value: str) -> float:
 
 
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Reject duplicate object keys instead of choosing between ambiguous argument values."""
     value: dict[str, Any] = {}
     for key, item in pairs:
         if key in value:
@@ -32,7 +37,15 @@ def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def decode_json(text: str, broad: bool) -> Any:
+    """Decode strict JSON or apply only the explicitly supported local syntax repairs.
+
+    Broad mode removes trailing commas outside strings and closes complete,
+    otherwise balanced wrappers. It never closes strings, invents values, or
+    evaluates expressions. Invalid JSON raises ValueError or RecursionError.
+    """
+
     def load(source: str) -> Any:
+        """Decode one candidate while rejecting duplicate keys and non-finite numbers."""
         return json.loads(
             source,
             parse_constant=_reject_constant,
@@ -79,6 +92,7 @@ def decode_json(text: str, broad: bool) -> Any:
 
 
 def _unwrap(text: str, broad: bool) -> str:
+    """Strip a whole-response JSON fence in broad mode; never scan prose for embedded calls."""
     text = text.strip()
     if broad:
         match = re.fullmatch(r"```(?:json)?\s*\n?([\s\S]*?)\n?```", text, re.IGNORECASE)
@@ -88,6 +102,7 @@ def _unwrap(text: str, broad: bool) -> str:
 
 
 def _call(value: Any, broad: bool) -> dict[str, Any]:
+    """Normalize one supported call wrapper into an exact tool name and argument object."""
     if not isinstance(value, dict):
         raise ParseFailure("Tool calls must be objects")
     if broad and "functionCall" in value:
@@ -115,6 +130,9 @@ def _call(value: Any, broad: bool) -> dict[str, Any]:
 
 
 def validate_parsed(parsed: Parsed, policy: ToolPolicy, config: Parsing) -> Parsed:
+    """Validate Unicode, calling restrictions, all tool names, and all argument schemas
+    atomically.
+    """
     try:
         if parsed.content is not None:
             parsed.content.encode("utf-8")
@@ -146,6 +164,12 @@ def validate_parsed(parsed: Parsed, policy: ToolPolicy, config: Parsing) -> Pars
 
 
 def parse_output(text: str, policy: ToolPolicy, config: Parsing) -> Parsed:
+    """Classify a whole response as an answer or a recognizable attempted tool call.
+
+    Only complete supported envelopes are considered actionable; arbitrary
+    prose and quoted examples are not searched for call-shaped substrings.
+    An invalid or ambiguous attempt raises ParseFailure for model correction.
+    """
     broad = config.tolerance == "broad"
     source = _unwrap(text, broad)
     # Never search arbitrary prose, code, or quoted examples for tool-shaped substrings.

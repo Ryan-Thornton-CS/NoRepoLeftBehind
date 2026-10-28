@@ -1,3 +1,5 @@
+"""Coordinate transformation, upstream generation, correction, and response conversion."""
+
 import asyncio
 import time
 import uuid
@@ -6,20 +8,34 @@ from typing import Any
 
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 
-from .config import Settings
-from .context import Session, Sessions, normalized_history, require_full_history
-from .diagnostics import Diagnostics
-from .errors import BridgeError, ParseFailure
-from .parsing import decode_json, parse_output, validate_parsed
-from .pointers import get, insert
-from .prompts import correction_body
-from .protocol import Parsed, ToolPolicy, UpstreamResult, compact, validate_request
-from .transform import budget, transform
-from .upstream import Upstream
+from norepoleftbehind.api.upstream import Upstream
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import (
+    Parsed,
+    ToolPolicy,
+    UpstreamResult,
+    compact,
+    validate_request,
+)
+from norepoleftbehind.protocol.errors import BridgeError, ParseFailure
+from norepoleftbehind.protocol.pointers import get, insert
+from norepoleftbehind.runtime.diagnostics import Diagnostics
+from norepoleftbehind.runtime.sessions import (
+    Session,
+    Sessions,
+    normalized_history,
+    require_full_history,
+)
+from norepoleftbehind.translation.parsing import decode_json, parse_output, validate_parsed
+from norepoleftbehind.translation.prompts import correction_body
+from norepoleftbehind.translation.transform import budget, transform
 
 
 class Bridge:
+    """Coordinate isolated HTTP-to-prompt-to-HTTP translation; never dispatch tools."""
+
     def __init__(self, settings: Settings, upstream: Upstream | None = None) -> None:
+        """Create concurrency controls, session registry, transport, and diagnostic ownership."""
         self.settings = settings
         self.upstream = upstream or Upstream(settings)
         self.sessions = Sessions(settings)
@@ -27,6 +43,19 @@ class Bridge:
         self.diagnostics = Diagnostics(settings)
 
     async def handle(self, body: Any, headers: dict[str, str]) -> dict[str, Any]:
+        """Process one harness request within its concurrency and overall deadline budgets.
+
+        Args:
+            body: Decoded Chat Completions request awaiting validation.
+            headers: Incoming HTTP headers; names are normalized before forwarding.
+
+        Returns:
+            A standard completion containing text or tool requests for the harness.
+
+        Raises:
+            BridgeError: For validation, translation, provider, or timeout failures.
+            CancelledError: When the HTTP caller disconnects or the server cancels work.
+        """
         started = time.monotonic()
         headers = {key.lower(): value for key, value in headers.items()}
         request = validate_request(body)
@@ -56,6 +85,9 @@ class Bridge:
 
     @asynccontextmanager
     async def _session(self, body: dict[str, Any], headers: dict[str, str]) -> Any:
+        """Acquire optional conversation state and reset uncertain state on any interrupted
+        request.
+        """
         if self.settings.cloud_context.enabled:
             async with self.sessions.acquire(self.sessions.key(body, headers)) as session:
                 try:
@@ -74,6 +106,9 @@ class Bridge:
         headers: dict[str, str],
         session: Session | None,
     ) -> dict[str, Any]:
+        """Transform history, generate/repair output, serialize calls, and atomically commit safe
+        state.
+        """
         settings = self.settings
         policy = ToolPolicy.from_request(original)
         if settings.tools_mode == "omit":
@@ -209,6 +244,9 @@ class Bridge:
         return response
 
     def _parse(self, result: UpstreamResult, policy: ToolPolicy) -> tuple[Parsed, str]:
+        """Validate one provider choice; classify refusals, truncation, native calls, and text
+        envelopes.
+        """
         try:
             choices = result.document["choices"]
             if not isinstance(choices, list) or len(choices) != 1:
@@ -276,6 +314,7 @@ class Bridge:
 
     @staticmethod
     def _failed_output(result: UpstreamResult) -> str:
+        """Extract only the failed model message for an isolated correction request."""
         try:
             message = result.document["choices"][0]["message"]
             if message.get("tool_calls"):
@@ -286,6 +325,9 @@ class Bridge:
 
     @staticmethod
     def _error_code(exc: APIStatusError) -> str | None:
+        """Read a structured provider error code without copying its potentially sensitive
+        message.
+        """
         value = exc.body
         if isinstance(value, dict):
             error = value.get("error", value)

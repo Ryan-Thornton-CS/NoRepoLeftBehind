@@ -1,205 +1,144 @@
-# LLM Tool Bridge
+# NoRepoLeftBehind
 
-Local OpenAI-compatible middleware for VS Code Copilot. It translates tool definitions
-into prompts and generated tool requests back into Chat Completions `tool_calls`.
-**It never executes tools.** Your harness approves and executes every returned call.
+[![CI](https://github.com/Ryan-Thornton-CS/NoRepoLeftBehind/actions/workflows/ci.yml/badge.svg)](https://github.com/Ryan-Thornton-CS/NoRepoLeftBehind/actions/workflows/ci.yml)
 
-Requires Python 3.12+ on Linux/WSL. See the example YAML for configuration.
+Use your work LLM API with Copilot, even when the API drops system instructions,
+ignores conversation history, or does not support native tool calling.
 
-For a release wheel, install with `python -m pip install /path/to/llm_tool_bridge-0.1.0-py3-none-any.whl`,
-then run `llm-tool-bridge serve --upstream-base-url https://your-gateway.example/v1`.
-The following commands are for a source checkout with uv installed:
+NoRepoLeftBehind runs locally between Copilot and your OpenAI-compatible API. It
+puts the instructions, conversation, and available tool definitions into a format
+the model can use, then returns ordinary OpenAI responses to Copilot.
+**Copilot continues to approve and execute tools.**
 
-```bash
-uv sync --locked --dev
-uv run llm-tool-bridge validate --config examples/bridge.yaml
-uv run llm-tool-bridge diagnostics
-uv run llm-tool-bridge serve --config examples/bridge.yaml --upstream-base-url https://your-gateway.example/v1
-```
+Supports Linux/WSL, Python 3.12+, and `/v1/chat/completions`. Model IDs and API
+credentials stay in your Copilot configuration. The installed command is
+`norepoleftbehind`.
 
-The gateway URL must be a base URL, not the complete `/chat/completions` route.
-Keep credentials in the harness. They are forwarded per request, never stored in config.
+## Install and start
 
-## VS Code Copilot
+1. Open [Releases](https://github.com/Ryan-Thornton-CS/NoRepoLeftBehind/releases)
+   and download `NoRepoLeftBehind-0.1.0.zip`. It includes the installable wheel,
+   complete project source, and a commented `bridge.yaml`. Alternatively, download
+   the wheel and `bridge.yaml` separately.
+2. Extract the ZIP and open a terminal in its `NoRepoLeftBehind-0.1.0` directory.
+   Create an environment and install the wheel:
 
-In **Chat: Manage Language Models**, add a **Custom Endpoint** using the full URL
-`http://127.0.0.1:8787/v1/chat/completions`. Select Chat Completions, enter your actual
-gateway model ID, and store your gateway credential in VS Code's secret storage.
-Set `toolCalling: true`, `vision: false`, and the appropriate input/output limits.
-The proxy translates tool requests; Copilot retains its tool execution and approval flow.
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   python -m pip install ./norepoleftbehind-0.1.0-py3-none-any.whl
+   ```
 
-Representative entry in `chatLanguageModels.json` (follow your VS Code version's
-generated provider structure):
+   pip downloads the required Python dependencies. You do not need the `scripts/`
+   directory to run the application.
+3. Edit `bridge.yaml`. Set `upstream_base_url` to your work API's base URL, such as
+   `https://your-gateway.example/v1`. Leave off `/chat/completions`. Keep tokens
+   out of this file.
+4. Validate the configuration, run the offline check, and start the service:
 
-```json
-{
-  "name": "Work gateway through bridge",
-  "vendor": "customendpoint",
-  "apiKey": "${input:workGatewayKey}",
-  "models": [{
-    "id": "gemini-3.8-flash",
-    "name": "Work Gemini Flash",
-    "url": "http://127.0.0.1:8787/v1/chat/completions",
-    "apiType": "chat-completions",
-    "toolCalling": true,
-    "vision": false,
-    "streaming": true,
-    "maxInputTokens": 120000,
-    "maxOutputTokens": 16000
-  }]
-}
-```
+   ```bash
+   norepoleftbehind validate --config bridge.yaml
+   norepoleftbehind diagnostics --config bridge.yaml
+   norepoleftbehind serve --config bridge.yaml
+   ```
 
-These token values are examples, not verified gateway/model limits. Injected schemas
-and instructions consume additional input budget. Check buffering latency against
-your Copilot version's timeout before regular use. In WSL or VS Code Remote, ensure
-the extension host can reach the selected localhost address; use port forwarding as needed.
+The offline check sends no model requests. Once started, the local endpoint is
+`http://127.0.0.1:8787/v1/chat/completions`. Leave that terminal running; press
+**Ctrl+C** to stop. For installation from a source checkout, see
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
-For API-key header authentication, configure the harness's `requestHeaders` with
-`api-key: ${apiKey}` (or the header your gateway requires). The bridge preserves that
-header without adding a bearer credential. Extend `forward_headers` for other gateway
-headers. Hop-by-hop headers, cookies, and the bridge session header are not forwarded.
-The bridge does not provide `/v1/models` discovery: configure exact model IDs explicitly.
+## Connect VS Code Copilot
 
-## Profiles and limits
+1. Run **Chat: Manage Language Models** and add a **Custom Endpoint**.
+2. Choose **Chat Completions** and use
+   `http://127.0.0.1:8787/v1/chat/completions` as the endpoint URL.
+3. Enter your gateway's exact model ID and store its API key through VS Code's
+   credential prompt. Repeat for other models you want to use.
+4. Enable tool calling and disable image inputs for this endpoint. Set input/output
+   token limits according to your gateway's actual limits.
+5. Select the model in Copilot and try a short request, then a task that uses a tool.
 
-`examples/bridge.yaml` documents the available settings and two optional profiles:
+Custom gateway authentication headers can be supplied through VS Code's
+`requestHeaders`, for example `api-key: ${apiKey}`. Add custom header names to
+`forward_headers` in the bridge configuration when needed. In WSL or Remote
+sessions, the extension host must be able to reach the local endpoint.
 
-```bash
-uv run llm-tool-bridge serve --config examples/bridge.yaml --profile preserves_messages --upstream-base-url https://your-gateway.example/v1
-```
+The [VS Code model configuration guide](https://code.visualstudio.com/docs/agent-customization/language-models)
+provides the current UI and configuration reference.
 
-Precedence is defaults → YAML base → selected YAML profile → environment → CLI flags.
-Environment names use `LLM_BRIDGE__` and double underscores for nested settings:
+## Choose how context is sent
 
-```bash
-export LLM_BRIDGE__LIMITS__MAX_CONCURRENCY=8
-export LLM_BRIDGE__LIMITS__REQUEST_TIMEOUT_SECONDS=180
-export LLM_BRIDGE__HISTORY_MODE=messages
-```
+The default, `history_mode: flatten`, places all history supplied by Copilot into
+one user message together with instructions and tool definitions. Use it when your
+API reads only the last user message.
 
-Arrays/objects, booleans, and numbers use JSON values in environment variables.
-Unknown configuration fields fail validation. Restart after changes. Native tool or
-instruction preservation requires `history_mode: messages`; incompatible flattening
-combinations fail validation instead of silently losing roles.
-
-Flattening serializes **all history supplied by the harness**, not history previously
-discarded by that harness. Message mode preserves user/assistant turns, renders tool
-exchanges as text, and injects schemas/instructions into the final user continuation.
-Text-only content arrays are accepted; image/audio/file parts are rejected. `n` must be
-1. Legacy `functions` are unsupported. Function schemas may use local `$ref` references;
-external references are rejected without network access.
-
-Native `response_format` conflicts with prompt-based tool translation and is rejected.
-Use `drop_body_fields` only for gateway-specific unsupported parameters; the bridge does
-not assume that native Gemini parameter restrictions apply unchanged through your gateway.
-
-The hard prompt limit measures bytes **after** transformation. Optional token preflight
-uses `ceil(UTF-8 bytes / estimated_bytes_per_token * token_safety_margin)` and is explicitly
-an estimate; it cannot guarantee an exact model context fit. Upstream budget errors are
-propagated with sanitized messages. No automatic trimming or summarization is performed.
-
-## Parsing and correction
-
-The model is instructed to produce an object with `content` and `tool_calls`. Broad mode
-accepts entire JSON fences, OpenAI/Gemini function wrappers, root call arrays, trailing
-commas, and missing closing brackets when strings and values are otherwise complete.
-It never searches arbitrary prose for calls, evaluates expressions, fills missing values,
-or accepts unknown tools. Duplicate keys, unterminated strings, and invalid arguments
-are sent for correction. Canonical mode requires the canonical shape.
-
-`tool_choice` (including `none`, `required`, and named tools), `parallel_tool_calls`, and
-`parsing.max_tool_calls` are enforced on the whole batch. A partial valid batch is not
-returned. Printed or quoted examples cannot trigger a tool through substring matching.
-Text protocols remain ambiguous in principle: a whole response intentionally reproducing
-an exact call envelope is indistinguishable from a requested call. Harness approval remains
-the execution boundary. Injected instructions also cannot recreate native system-role priority.
-
-Correction requests contain only `schema`, `failed_response`, and `example`. They use a
-fresh SDK client, the same model/authentication, and no conversation or provider cookies.
-The default is two attempts within the original deadline. For complex parameter schemas,
-supply a valid `parsing.example_arguments.<tool_name>` if the bounded example generator
-cannot produce one; otherwise correction fails clearly rather than fabricating arguments.
-
-The middleware buffers JSON or SSE upstream responses, validates/corrects them, and only
-then opens downstream SSE. Errors therefore remain HTTP errors. Missing usage stays
-missing; original generation usage and correction usage are kept separate using a `bridge`
-extension. Cancellation stops upstream work. SDK automatic retries are disabled. Only a
-recognized rejected continuation code permits one retry with a fresh full context.
-
-## Concurrent chats and optional cloud context
-
-Eight concurrent requests are allowed by default. With cloud context disabled there is
-no history registry and no session ID requirement. SDK clients, authentication, cookies,
-buffers, and corrections are isolated per logical request. This sacrifices connection
-reuse across independent requests in favor of isolation; benchmark actual TLS latency
-against your gateway before optimizing pooling.
-
-Cloud context is **off by default**. The Google Interactions preset (`/id` →
-`/previous_interaction_id`) is a configurable mapping, not evidence that your gateway's
-Chat Completions route supports it. Vertex `/responseId` is not assumed to be a continuation
-token. Verify field semantics and stateless corrections against your actual gateway first.
-Enable only with `cloud_context.enabled: true` and `contract_verified: true`.
-
-To select a response header instead, set `response_id_pointer: null` and
-`response_id_header: X-Your-Context-ID`. A custom mapping may use nested JSON Pointers,
-including escaped object keys. `request_id_pointer` selects the extra request field.
-
-Enabled cloud state also requires a **verified, stable per-conversation ID** from the harness.
-The default source is `X-LLM-Bridge-Session-ID`; alternatively set `session_id_header: null`
-and a `session_id_body_pointer`. Do not configure a fixed provider-wide header and call
-it a chat ID. Current Copilot custom endpoints may not supply a suitable dynamic ID.
-Use the default request-local mode in that case; do not enable cloud continuation.
-
-The registry holds opaque provider IDs and history digests, not transcripts or raw credentials.
-Keys are HMAC-scoped by upstream/model/conversation/forwarded credentials. Sessions expire
-after 30 minutes idle by default, have a bounded count, and are never persisted. Same-session
-requests serialize. Unseen turns continue from the saved ID; current instructions and tools
-are reinjected. Model/auth changes, edits, expiry, or rejected IDs start fresh with supplied
-full history. A fresh context cannot begin with an orphaned tool result. Repaired responses
-reset cloud state because the provider may have stored the malformed original response.
-
-## Diagnostics and development
-
-Metadata logs contain statuses, timings, call counts, and correction outcomes. They omit
-headers, prompts, and arguments. `diagnostics.content_traces: true` explicitly enables
-bounded rotating local content traces; protect that directory because it can contain work
-content. Incoming header values are redacted from traces. No cloud session transcript is
-persisted. `/healthz` reports process health, not upstream availability.
+If the API keeps user/assistant message history, use the supplied profile:
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy
-uv run pytest
-uv build
-uv run python scripts/benchmark.py --requests 64 --concurrency 8
+norepoleftbehind serve --config bridge.yaml --profile preserves_messages
 ```
 
-The benchmark uses a synthetic in-process gateway and reports transformation overhead,
-latency, and traced allocations. It does not measure provider inference, TLS performance,
-or justify a Python-versus-Rust claim by itself.
+You can independently inject, preserve, or omit system instructions and tool
+schemas. Every setting and allowed choice is described in
+[examples/bridge.yaml](examples/bridge.yaml). Configuration precedence is YAML base,
+selected profile, environment, then CLI flags. Restart after changes.
 
-Live evaluation is opt-in, uses your configured gateway through a running bridge, and incurs
-model requests. Provide the token through the environment, never a command-line argument:
+For example, change a nested setting without editing YAML:
 
 ```bash
-# Set LLM_BRIDGE_EVAL_TOKEN using your preferred secret-loading mechanism first.
-uv run python scripts/evaluate.py --models gemini-3.8-flash gemini-4-argon --repeats 3
+export NOREPOLEFTBEHIND__LIMITS__MAX_CONCURRENCY=4
 ```
 
-The evaluator acts as a synthetic harness supplying predefined fixture results. It reports
-first-pass validity, corrected responses, tool-name/argument correctness, false tool detections,
-and completed loops; it never dispatches generated actions. Exact work-gateway aliases may differ.
+## Where tools and skills come from
 
-## CI and release
+**Tools:** Copilot sends the enabled tools for each request in its `tools` array.
+This can include built-in, extension, and MCP tools. The bridge injects their names,
+descriptions, and JSON argument schemas into the prompt. It validates generated
+calls and returns standard `tool_calls`; it never connects to MCP servers or
+executes the tools. Only tools actually advertised in that request are available.
 
-GitHub Actions runs lint/format/type checks, fake-upstream and SDK tests, package builds,
-fresh wheel/source installs, and an installed HTTP-server health smoke test on Python
-3.12, 3.13, and 3.14. Normal CI needs no work credentials or live model calls.
+**Skills:** skills provide instructions and supporting resources. Copilot supplies
+available skill information and loads relevant `SKILL.md` content into context.
+The bridge preserves that supplied context and adds `skill_prompt` guidance for
+using it. If instructions still need loading, the model must request an available
+loading or reading tool. Skill names do not become invented function names.
+[How Copilot uses skills](https://code.visualstudio.com/docs/agent-customization/agent-skills#how-copilot-uses-skills)
+explains this distinction.
 
-A version tag such as `v0.1.0` reuses the full CI matrix, checks tag/package/module version
-agreement, and creates a **draft** GitHub Release with wheel, source archive, checksums,
-README, and example YAML. PyPI publishing is not configured. Workflows become active
-when this project is pushed to a GitHub repository; no repository or release is created
-by local installation. `/v1/responses` is a future adapter, not implemented in v0.1.
+Set `skill_prompt: null` to disable the added skill guidance, or replace the text
+in YAML. This does not remove skill instructions already supplied by Copilot;
+those follow the normal history/instruction settings. The bridge does not discover
+skills or read local skill files on its own.
+
+## Sessions, privacy, and limits
+
+- Multiple chats can run concurrently. By default, each request uses only its own
+  supplied history; no conversation identifier or persistent transcript is needed.
+- Cloud context is optional and off by default. Enable it only after verifying your
+  gateway's continuation contract and a stable per-chat ID from the client. A static
+  provider-wide header is not a separate identity for each chat. The Google mapping
+  in the example is a preset, not a guarantee of gateway support.
+- Logs contain metadata by default. Content tracing requires explicit opt-in and can
+  contain work content. Credentials are forwarded per request, not saved in YAML.
+- Responses are buffered for validation and possible correction before streaming
+  to Copilot. This delays the first visible output. Check the client timeout with
+  your gateway.
+- Oversized prompts fail clearly instead of silently losing history. Token estimates
+  are approximate, and injected schemas also consume input budget.
+- This release handles text and function tools. Images, audio, legacy `functions`,
+  multiple choices, `/v1/models` discovery, and `/v1/responses` are not supported.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| Service asks for a gateway URL | Replace the `.invalid` placeholder in `bridge.yaml`. |
+| Authentication fails | Check the credential in Copilot and the forwarded header name. |
+| Tool requests repeatedly fail | Check the configured schema and correction budget. Complex schemas may need `parsing.example_arguments`. |
+| Context budget is exceeded | Let Copilot compact its history, or adjust the configured budget to your API's limits. |
+| Cloud context asks for a session ID | Use a verified per-conversation ID or leave cloud context disabled. |
+| Copilot times out | Check provider latency, buffering, and the configured overall deadline. |
+
+For development, benchmarks, source layout, and release instructions, see the
+[developer README](docs/README.md). Report problems in
+[GitHub Issues](https://github.com/Ryan-Thornton-CS/NoRepoLeftBehind/issues).

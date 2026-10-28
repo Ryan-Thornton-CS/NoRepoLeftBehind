@@ -1,3 +1,5 @@
+"""Validate text-only Chat Completions requests and represent tool translation contracts."""
+
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -5,14 +7,16 @@ from typing import Any
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import SchemaError
 
-from .errors import BridgeError
+from norepoleftbehind.protocol.errors import BridgeError
 
 
 def compact(value: Any) -> str:
+    """Encode finite JSON values compactly while retaining non-ASCII text."""
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
 
 
 def text_content(value: Any) -> str:
+    """Normalize text or text-part arrays; reject images, audio, files, and other shapes."""
     if value is None:
         return ""
     if isinstance(value, str):
@@ -35,6 +39,15 @@ def text_content(value: Any) -> str:
 
 @dataclass
 class ToolPolicy:
+    """Represent the current tool registry and harness-supplied calling restrictions.
+
+    Attributes:
+        schemas: Function definitions keyed by their unique exact names.
+        choice: auto, none, required, or the internal named-tool selection marker.
+        named: Exact required tool name when choice is named.
+        parallel: Whether more than one call may be returned in a response.
+    """
+
     schemas: dict[str, dict[str, Any]] = field(default_factory=dict)
     choice: str = "auto"
     named: str | None = None
@@ -42,6 +55,9 @@ class ToolPolicy:
 
     @classmethod
     def from_request(cls, body: dict[str, Any]) -> "ToolPolicy":
+        """Validate tool declarations and calling restrictions; reject external schema
+        references.
+        """
         schemas: dict[str, dict[str, Any]] = {}
         tools = body.get("tools") or []
         if not isinstance(tools, list):
@@ -94,6 +110,7 @@ class ToolPolicy:
 
     @staticmethod
     def _check_refs(node: Any, depth: int = 0) -> None:
+        """Recursively bound schema nesting and permit only local schema references."""
         if depth > 64:
             raise BridgeError(400, "invalid_schema", "Schema nesting exceeds 64 levels")
         if isinstance(node, dict):
@@ -110,22 +127,36 @@ class ToolPolicy:
                 ToolPolicy._check_refs(value, depth + 1)
 
     def constraints(self) -> dict[str, Any]:
+        """Render calling restrictions for the injected protocol and correction schema."""
         return {"tool_choice": self.named or self.choice, "parallel_tool_calls": self.parallel}
 
 
 @dataclass
 class Parsed:
+    """Hold optional assistant text and validated argument objects; never executable actions."""
+
     content: str | None
     calls: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass
 class UpstreamResult:
+    """Retain decoded provider JSON and lowercase HTTP headers for configured ID extraction."""
+
     document: dict[str, Any]
     headers: dict[str, str]
 
 
 def validate_request(body: Any) -> dict[str, Any]:
+    """Validate the supported text-only, single-choice Chat Completions request subset.
+
+    Returns:
+        The original mapping, unchanged; transformation subsequently copies it.
+
+    Raises:
+        BridgeError: For invalid roles, malformed tool history, unsupported content,
+            multiple choices, or legacy function-calling fields.
+    """
     if not isinstance(body, dict):
         raise BridgeError(400, "invalid_request", "Request body must be a JSON object")
     if not isinstance(body.get("model"), str) or not body["model"]:

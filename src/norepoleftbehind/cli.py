@@ -1,72 +1,33 @@
+"""Provide the installed serve, validate, and offline diagnostics commands."""
+
 import argparse
 import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 import uvicorn
 from pydantic import ValidationError
 
-from . import __version__
-from .app import create_app
-from .config import Settings, load_settings
-from .parsing import parse_output
-from .protocol import ToolPolicy
-from .transform import transform
+from norepoleftbehind import __version__
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.configuration import load_settings
 
-
-def diagnostics(settings: Settings) -> dict[str, Any]:
-    request = {
-        "model": "gemini-3.8-flash",
-        "messages": [
-            {"role": "system", "content": "Be precise."},
-            {"role": "user", "content": "Read the synthetic fixture."},
-        ],
-        "tools": [
-            {
-                "type": "function",
-                "function": {
-                    "name": "read_fixture",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {"path": {"type": "string"}},
-                        "required": ["path"],
-                        "additionalProperties": False,
-                    },
-                },
-            }
-        ],
-    }
-    policy = ToolPolicy.from_request(request)
-    checks: dict[str, bool] = {}
-    for mode in ("flatten", "messages"):
-        profile = settings.model_copy(
-            update={
-                "history_mode": mode,
-                "instructions": "inject",
-                "tools_mode": "prompt_and_translate",
-            }
-        )
-        outgoing = transform(request, profile, policy)
-        checks[mode] = outgoing["messages"][-1]["role"] == "user" and "tools" not in outgoing
-    parsed = parse_output(
-        '{"content":null,"tool_calls":[{"name":"read_fixture","arguments":{"path":"fixture"}}]}',
-        policy,
-        settings.parsing,
-    )
-    checks["tool_translation"] = parsed.calls[0]["name"] == "read_fixture"
-    return {
-        "ok": all(checks.values()),
-        "network_requests": 0,
-        "tools_executed": 0,
-        "checks": checks,
-    }
+from .runtime.checks import diagnostics
 
 
 def main(argv: list[str] | None = None) -> int:
+    """Run a command using YAML, environment, and explicit command-line settings.
+
+    Args:
+        argv: Arguments without the executable name; None uses sys.argv.
+
+    Returns:
+        Zero on success, one for failed diagnostics, or two for invalid settings.
+        argparse handles help and argument errors using its normal exit behavior.
+    """
     parser = argparse.ArgumentParser(
-        description="OpenAI tool prompt and translation bridge; never executes tools"
+        description="NoRepoLeftBehind: OpenAI-compatible tool prompt and translation middleware"
     )
     parser.add_argument("--version", action="version", version=__version__)
     subparsers = parser.add_subparsers(dest="command", required=True)

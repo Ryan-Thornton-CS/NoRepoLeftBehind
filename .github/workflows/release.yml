@@ -23,18 +23,17 @@ jobs:
       - name: Verify release version
         run: uv run python scripts/check_release.py "$GITHUB_REF_NAME"
       - run: uv build
+      - name: Verify and assemble complete-source release packages
+        run: uv run python scripts/package_release.py
       - name: Smoke-test wheel
         run: |
           uv venv /tmp/bridge-release
           uv pip install --python /tmp/bridge-release/bin/python dist/*.whl
-          /tmp/bridge-release/bin/llm-tool-bridge diagnostics
-          uv run python scripts/smoke_install.py /tmp/bridge-release/bin/llm-tool-bridge
-      - name: Prepare assets
-        run: |
-          cp README.md examples/bridge.yaml dist/
-          cd dist
-          sha256sum *.whl *.tar.gz README.md bridge.yaml > SHA256SUMS
+          /tmp/bridge-release/bin/norepoleftbehind diagnostics
+          uv run python scripts/smoke_install.py /tmp/bridge-release/bin/norepoleftbehind
       - name: Create draft release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" dist/* --draft --verify-tag --generate-notes
+        run: >-
+          gh release create "$GITHUB_REF_NAME" dist/release/"$GITHUB_REF_NAME"/*
+          --draft --verify-tag --generate-notes --title "NoRepoLeftBehind $GITHUB_REF_NAME"

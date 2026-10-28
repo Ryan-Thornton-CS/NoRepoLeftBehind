@@ -1,11 +1,13 @@
+"""Build versioned tool instructions and isolated correction prompts with valid examples."""
+
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
-from .config import Settings
-from .errors import BridgeError
-from .pointers import get
-from .protocol import ToolPolicy, compact
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import ToolPolicy, compact
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.protocol.pointers import get
 
 OUTPUT_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -27,6 +29,7 @@ OUTPUT_SCHEMA: dict[str, Any] = {
 
 
 def template_name(model: str, configured: str) -> str:
+    """Select an explicitly configured prompt template or infer a v1 family from the model ID."""
     if configured != "auto":
         return configured
     if "argon" in model.lower():
@@ -37,6 +40,9 @@ def template_name(model: str, configured: str) -> str:
 
 
 def tool_prompt(policy: ToolPolicy, model: str, settings: Settings) -> str:
+    """Render instructions, schemas, restrictions, and valid examples for text-based tool
+    requests.
+    """
     name = template_name(model, settings.prompt_template)
     examples = ""
     try:
@@ -61,8 +67,8 @@ def tool_prompt(policy: ToolPolicy, model: str, settings: Settings) -> str:
     )
     return (
         f"TOOL TRANSLATION PROTOCOL {name}\n\n"
-        "You request tools through text. The harness, not you or this middleware, executes them. "
-        "Return one JSON object matching OUTPUT_SCHEMA. Use only declared tool names and "
+        "To request tools, return one JSON object matching OUTPUT_SCHEMA. "
+        "Use only declared tool names and "
         "schema-valid arguments. Do not invent results. Do not output Markdown fences, "
         "reasoning, or prose outside that object. For a normal answer set tool_calls to [] "
         "and place the answer in content. For calls, content may be null or a brief message. "
@@ -78,6 +84,7 @@ def tool_prompt(policy: ToolPolicy, model: str, settings: Settings) -> str:
 
 
 def _sample(schema: Any, root: dict[str, Any], depth: int = 0) -> Any:
+    """Build a bounded candidate from common schema forms; callers must validate the candidate."""
     if depth > 10 or schema is False:
         raise ValueError("No bounded example")
     if schema is True:
@@ -137,6 +144,9 @@ def _sample(schema: Any, root: dict[str, Any], depth: int = 0) -> Any:
 
 
 def correction_example(policy: ToolPolicy, settings: Settings) -> dict[str, Any]:
+    """Choose a schema-valid supplied or synthesized example; fail rather than fabricate
+    arguments.
+    """
     example: dict[str, Any] | None = None
     names = [policy.named] if policy.named else list(policy.schemas)
     for name in names:
@@ -166,6 +176,9 @@ def correction_example(policy: ToolPolicy, settings: Settings) -> dict[str, Any]
 def correction_body(
     failed: str, policy: ToolPolicy, model: str, settings: Settings
 ) -> dict[str, Any]:
+    """Build a stateless repair request containing only schema, failed response, and valid
+    example.
+    """
     example = correction_example(policy, settings)
     payload = {
         "schema": {

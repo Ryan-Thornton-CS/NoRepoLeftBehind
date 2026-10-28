@@ -6,11 +6,11 @@ from copy import deepcopy
 import httpx
 from fastapi.responses import JSONResponse
 
-from llm_tool_bridge.app import create_app
-from llm_tool_bridge.config import Settings
-from llm_tool_bridge.context import Sessions
-from llm_tool_bridge.errors import BridgeError
-from llm_tool_bridge.upstream import Upstream
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.api.upstream import Upstream
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.runtime.sessions import Sessions
 
 from .conftest import completion, envelope
 
@@ -49,7 +49,7 @@ async def test_content_traces_opt_in_redact_authentication_and_rotate(
 
 
 async def test_default_metadata_does_not_log_prompts_or_tokens(api, request_body, caplog):
-    caplog.set_level(logging.INFO, logger="llm_tool_bridge")
+    caplog.set_level(logging.INFO, logger="norepoleftbehind")
     response = await api.post(
         "/v1/chat/completions",
         json=request_body,

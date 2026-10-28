@@ -1,18 +1,21 @@
+"""Send isolated OpenAI SDK requests and decode bounded JSON or SSE responses."""
+
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any
 
 from openai import AsyncOpenAI, DefaultAsyncHttpxClient, Omit, Timeout
 
-from .config import Settings
-from .errors import BridgeError
-from .parsing import decode_json
-from .protocol import UpstreamResult
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import UpstreamResult
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.translation.parsing import decode_json
 
 ClientFactory = Callable[[dict[str, str]], AsyncOpenAI]
 
 
 def _merge_chunk(document: dict[str, Any], chunk: dict[str, Any]) -> None:
+    """Accumulate one upstream choice delta while retaining provider-specific fields."""
     for key, value in chunk.items():
         if key not in {"choices", "usage", "object"}:
             document[key] = value
@@ -54,6 +57,12 @@ def _merge_chunk(document: dict[str, Any], chunk: dict[str, Any]) -> None:
 
 
 def decode_sse(raw: bytes) -> dict[str, Any]:
+    """Reconstruct one completion from a fully buffered upstream event stream.
+
+    Raises:
+        BridgeError: If events are malformed, contain an upstream error, or end
+            without both a finish reason and the DONE marker.
+    """
     document: dict[str, Any] = {
         "choices": [
             {"index": 0, "message": {"role": "assistant", "content": None}, "finish_reason": None}
@@ -87,7 +96,10 @@ def decode_sse(raw: bytes) -> dict[str, Any]:
 
 
 class Upstream:
+    """Own SDK request construction, credential forwarding, and response decoding."""
+
     def __init__(self, settings: Settings, factory: ClientFactory | None = None) -> None:
+        """Store settings and an optional test/embedding client factory."""
         self.settings = settings
         self.factory = factory
 
@@ -95,6 +107,12 @@ class Upstream:
     async def client(self, headers: dict[str, str]) -> AsyncIterator[AsyncOpenAI]:
         # A logical request owns its SDK client and cookie jar. Credentials, session cookies,
         # and auth defaults cannot leak across chats. Corrections use a separate client.
+        """Yield an SDK client with an isolated cookie jar and no automatic retries.
+
+        A fresh client is used for each logical request and each correction. The
+        production client disables redirects so gateway credentials stay at the
+        configured destination. The client is closed when the context exits.
+        """
         client = (
             self.factory(headers)
             if self.factory
@@ -122,6 +140,18 @@ class Upstream:
         *,
         correction: bool = False,
     ) -> UpstreamResult:
+        """Forward one request and return its decoded body and lowercase headers.
+
+        Args:
+            client: SDK client owned by the current request context.
+            body: Transformed Chat Completions payload, including configured extras.
+            headers: Lowercase incoming headers from which allowed values are copied.
+            correction: Remove request-correlation metadata from isolated repairs.
+
+        Raises:
+            BridgeError: If buffering exceeds its budget or response decoding fails.
+            APIStatusError: If the provider returns an unsuccessful HTTP status.
+        """
         allowed = {key.lower() for key in self.settings.forward_headers}
         blocked = {
             "host",

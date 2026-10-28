@@ -7,8 +7,8 @@ import pytest
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from openai import AsyncOpenAI
 
-from llm_tool_bridge.app import create_app
-from llm_tool_bridge.config import Settings
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.configuration.models import Settings
 
 from .conftest import completion, envelope
 

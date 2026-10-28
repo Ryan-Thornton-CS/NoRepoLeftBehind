@@ -1,59 +1,161 @@
-# Credentials and exact model IDs come from the harness. No secrets belong here.
-upstream_base_url: https://gateway.example.invalid/v1
-host: 127.0.0.1
-port: 8787
-history_mode: flatten
-instructions: inject
-tools_mode: prompt_and_translate
-prompt_template: auto
+# NoRepoLeftBehind configuration: adapt Copilot requests for a work model API.
+# Defaults flatten history, inject instructions/tools and skill guidance, and leave
+# cloud state/content tracing off. Tool execution always stays with the client.
+#
+# Precedence: defaults -> YAML base -> selected profile -> environment -> CLI.
+# Environment example: NOREPOLEFTBEHIND__LIMITS__MAX_CONCURRENCY=4
+# Use JSON for env booleans/numbers/arrays/objects. Restart after changes.
+# Tokens and exact model IDs come from the client, never from this file.
 
+# Provider API base URL (HTTP/HTTPS), normally ending in /v1. Replace this placeholder.
+# Do not append /chat/completions or embed credentials, query parameters, or fragments.
+upstream_base_url: https://gateway.example.invalid/v1
+# Local bind address. 127.0.0.1 listens on loopback; choose an address the client can reach.
+host: 127.0.0.1
+# Local listening port; integer 1..65535.
+port: 8787
+
+# flatten: serialize supplied history into one final user message.
+# messages: preserve user/assistant turns, rendering translated tool exchanges as text.
+history_mode: flatten
+# inject: move system/developer text into the final user message.
+# preserve: keep native roles (requires history_mode: messages).
+# omit: remove those instructions, including skill information carried only there.
+instructions: inject
+# prompt_and_translate: inject incoming tool schemas and parse calls back to OpenAI format.
+# preserve: forward native tool fields/history (requires history_mode: messages).
+# omit: remove tool definitions; requests that require a tool fail clearly.
+tools_mode: prompt_and_translate
+# auto: choose by model ID; other choices are generic_v1, gemini_flash_v1, gemini_argon_v1.
+# This selects prompting guidance, never changes the actual incoming model ID.
+prompt_template: auto
+# Guidance for skill descriptions/locations/instructions already supplied in context.
+# Replace this text to customize it; null or "" disables only this added guidance.
+# No skill discovery, local file reading, or extra tool registration is performed.
+skill_prompt: >-
+  Use a listed skill when its description is relevant to the request.
+  Available skill names, descriptions, locations, and loaded instructions are supplied
+  in the instructions or conversation context. Skills provide procedures and reference
+  material; they are not callable functions. If a relevant skill's instructions are not
+  already present, request an available skill-loading or file-reading tool using the
+  provided name or location, then wait for its result before applying those instructions.
+  Use only instructions actually supplied or loaded. Do not invent skills, locations,
+  instructions, or extra tools. A skill name may appear in tool_calls only if that exact
+  name is also a declared tool.
+
+# Allowed incoming headers to forward. Add names for your gateway's custom headers.
+# Incoming Authorization is always handled separately. Hop-by-hop headers, cookies,
+# and the configured bridge session header are excluded even if listed here.
+forward_headers:
+  - authorization
+  - api-key
+  - x-api-key
+  - x-goog-api-key
+  - x-request-id
+  - ocp-apim-subscription-key
+  - openai-organization
+  - openai-project
+# Optional top-level request fields to discard for a gateway that rejects them.
+# Example: [temperature]. Do not remove model or messages. No fields are dropped by default.
+drop_body_fields: []
+
+# Resource limits apply after injection where relevant; exceeded budgets fail instead of trimming.
 limits:
+  # Maximum active logical requests (including corrections); integer 1..512.
   max_concurrency: 8
+  # Overall deadline in seconds, >0; includes queueing, locks, generation, and corrections.
   request_timeout_seconds: 180
+  # Connection-establishment timeout in seconds, >0; cannot extend the overall deadline.
   connect_timeout_seconds: 10
+  # Hard incoming HTTP body cap in bytes; >=1024. Default 16 MiB.
   max_request_bytes: 16777216
+  # Hard serialized prompt/schema cap after transformation, in bytes; >=256. Default 8 MiB.
   max_prompt_bytes: 8388608
+  # Buffered response cap per upstream generation, in bytes; >=256. Default 8 MiB.
   max_response_bytes: 8388608
+  # Output token cap, >=1, used when the client supplies none and for correction requests.
   max_output_tokens: 16384
-  # Optional estimate-based preflight, not an exact provider tokenizer:
+  # Optional input estimate limit, >=1; null disables it. This is NOT exact provider tokenization.
   estimated_input_token_limit: null
+  # Positive divisor used in estimated tokens = ceil(bytes / divisor * safety margin).
   estimated_bytes_per_token: 3
+  # Estimate multiplier, >=1. Applies only when estimated_input_token_limit is set.
   token_safety_margin: 1.2
 
+# Parsing changes what is accepted from the model, never what tools are allowed to execute.
 parsing:
+  # broad: defined JSON/fence/function-wrapper repairs; canonical: canonical envelope only.
   tolerance: broad
+  # Isolated model correction attempts after parsing/schema failure; integer 0..5; 0 disables.
+  # Independent of HTTP retries (SDK automatic retries are disabled).
   correction_attempts: 2
+  # Maximum calls in one fully validated response; integer 1..256.
+  # Client tool_choice and parallel_tool_calls restrictions still apply.
   max_tool_calls: 32
-  # Supply schema-valid arguments here for complex schemas whose examples cannot
-  # be synthesized (e.g. regex-constrained identifiers).
+  # Optional schema-valid arguments keyed by exact tool name, used for prompt/correction examples.
+  # Useful for regex/complex schemas that the bounded example generator cannot synthesize.
+  # Example: {lookup_code: {id: ABC}}
   example_arguments: {}
 
+# Optional provider-managed conversation continuation, separate from prompt/history placement.
+# The Google mapping is NOT proof that your Chat Completions gateway supports continuation.
 cloud_context:
+  # false: strip configured continuation fields and keep each request self-contained.
+  # true: retain provider IDs, require a verified per-chat ID, and send unseen turns on continuation.
   enabled: false
-  # This mapping is a preset, not a claim that Chat Completions supports it.
-  # Verify your gateway's behavior before enabling.
+  # Must be true before enabled can be true; declare this only after verifying the gateway contract.
   contract_verified: false
+  # Label only: google_interactions or custom. Explicit pointers below always control the mapping.
   preset: google_interactions
+  # Response JSON Pointer for the provider continuation ID. Set null when using a header source.
+  # /id is the Google Interactions mapping; Vertex /responseId alone proves no continuation semantics.
   response_id_pointer: /id
+  # Alternative response-header name, or null. Exactly one response-ID source must be selected.
   response_id_header: null
+  # Object-field JSON Pointer at which to send the previous ID. Escapes: ~1 means /, ~0 means ~.
+  # Cannot overwrite core messages, model, tools, or stream fields.
   request_id_pointer: /previous_interaction_id
-  session_id_header: X-LLM-Bridge-Session-ID
+  # Client header holding a stable, verified per-conversation identity; null selects the body source.
+  # A constant provider-wide header or per-request ID does not isolate chats.
+  session_id_header: X-NoRepoLeftBehind-Session-ID
+  # Alternative client JSON Pointer for the chat identity; removed before forwarding.
+  # When cloud context is enabled, select exactly one session-ID source.
   session_id_body_pointer: null
+  # Positive idle lifetime in seconds; expired state is discarded on registry access. Default 30 min.
   idle_ttl_seconds: 1800
+  # Registry capacity, integer 1..10000; idle entries may be evicted, active/queued entries cannot.
   max_sessions: 128
+  # Maximum supplied full history per cloud request, bytes >=1024. Only digests are retained.
   max_history_bytes: 8388608
+  # Structured provider error codes allowing one fresh-context retry with complete supplied history.
+  # All other HTTP errors are returned without automatic replay.
+  rejected_context_codes:
+    - invalid_context
+    - context_not_found
+    - invalid_previous_interaction_id
 
+# Logs contain metadata by default. Content traces can contain work data; enable deliberately.
 diagnostics:
+  # true opts into bounded prompt/output traces; false writes no content traces.
   content_traces: false
+  # Output directory; relative paths resolve from the process working directory.
   trace_directory: traces
+  # Per-file rotation threshold in bytes, >=1024. A record may cross the threshold before rotation.
   trace_max_bytes: 1048576
+  # Rotated backup count, integer 0..10. Set 0 for no backup rotation.
   trace_backup_count: 2
+  # Maximum encoded record after truncation/redaction, bytes >=256; oversized records are skipped.
   trace_record_bytes: 65536
 
+# Optional named partial overrides. Select one with --profile NAME; maps merge, lists replace.
+# Add your own names using the same fields documented above. Profiles inherit unspecified defaults.
 profiles:
+  # For gateways that retain ordinary message history but need injected instructions/tool schemas.
   preserves_messages:
     history_mode: messages
+  # For gateways that already support native roles and tools; disable the added skill guidance.
   native_passthrough:
     history_mode: messages
     instructions: preserve
     tools_mode: preserve
+    skill_prompt: null

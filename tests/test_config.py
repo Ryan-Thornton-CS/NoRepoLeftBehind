@@ -3,16 +3,16 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from llm_tool_bridge.cli import main
-from llm_tool_bridge.config import Settings, load_settings
-from llm_tool_bridge.pointers import get, insert, remove
+from norepoleftbehind.cli import main
+from norepoleftbehind.configuration import Settings, load_settings
+from norepoleftbehind.protocol.pointers import get, insert, remove
 
 
 def test_yaml_profile_env_cli_precedence(tmp_path, monkeypatch):
     path = tmp_path / "config.yaml"
     path.write_text("port: 8000\nprofiles:\n  work:\n    port: 8001\n    history_mode: messages\n")
-    monkeypatch.setenv("LLM_BRIDGE__PORT", "8002")
-    monkeypatch.setenv("LLM_BRIDGE__LIMITS__MAX_CONCURRENCY", "4")
+    monkeypatch.setenv("NOREPOLEFTBEHIND__PORT", "8002")
+    monkeypatch.setenv("NOREPOLEFTBEHIND__LIMITS__MAX_CONCURRENCY", "4")
     config = load_settings(path, "work", {"port": 8003})
     assert config.port == 8003
     assert config.history_mode == "messages"

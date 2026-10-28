@@ -2,10 +2,10 @@ from copy import deepcopy
 
 import pytest
 
-from llm_tool_bridge.config import Settings
-from llm_tool_bridge.errors import BridgeError
-from llm_tool_bridge.protocol import ToolPolicy
-from llm_tool_bridge.transform import transform
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import ToolPolicy
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.translation.transform import transform
 
 
 def test_flatten_everything_without_mutating_input(request_body):

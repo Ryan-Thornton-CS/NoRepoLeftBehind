@@ -5,8 +5,8 @@ import httpx
 import pytest
 from fastapi.responses import JSONResponse
 
-from llm_tool_bridge.app import create_app
-from llm_tool_bridge.config import Settings
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.configuration.models import Settings
 
 from .conftest import completion, envelope
 
@@ -32,7 +32,7 @@ async def first_turn(api, body, session="chat-a", token="token-a"):
     return await api.post(
         "/v1/chat/completions",
         json=body,
-        headers={"X-LLM-Bridge-Session-ID": session, "Authorization": "Bearer " + token},
+        headers={"X-NoRepoLeftBehind-Session-ID": session, "Authorization": "Bearer " + token},
     )
 
 
@@ -70,7 +70,7 @@ async def test_continuation_sends_only_unseen_turns_and_reinjects_instructions(
     assert "Read README.md" not in body["messages"][0]["content"]
     assert "Use the file tool" in body["messages"][0]["content"]
     assert "TOOL_DEFINITIONS" in body["messages"][0]["content"]
-    assert "x-llm-bridge-session-id" not in headers
+    assert "x-norepoleftbehind-session-id" not in headers
     state = next(iter(app.state.bridge.sessions.entries.values()))
     assert "first answer" not in str(state.history)  # only digests are stored
 

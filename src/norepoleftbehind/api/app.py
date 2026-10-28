@@ -1,3 +1,5 @@
+"""Expose the local HTTP API and cancel upstream work when a client disconnects."""
+
 import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
@@ -7,66 +9,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from starlette.requests import ClientDisconnect
 
-from . import __version__
-from .config import Settings
-from .errors import BridgeError
-from .parsing import decode_json
-from .protocol import compact
-from .service import Bridge
-from .upstream import ClientFactory, Upstream
+from norepoleftbehind import __version__
+from norepoleftbehind.api.upstream import ClientFactory, Upstream
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import compact
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.runtime.service import Bridge
+from norepoleftbehind.translation.parsing import decode_json
 
-
-async def sse(response: dict[str, Any], include_usage: bool) -> AsyncIterator[str]:
-    base = {key: response[key] for key in ("id", "created", "model")}
-    base["object"] = "chat.completion.chunk"
-
-    def event(delta: dict[str, Any], finish: str | None = None) -> str:
-        return (
-            "data: "
-            + compact({**base, "choices": [{"index": 0, "delta": delta, "finish_reason": finish}]})
-            + "\n\n"
-        )
-
-    yield event({"role": "assistant"})
-    message = response["choices"][0]["message"]
-    content = message.get("content") or ""
-    for offset in range(0, len(content), 1024):
-        yield event({"content": content[offset : offset + 1024]})
-    for index, call in enumerate(message.get("tool_calls", [])):
-        yield event(
-            {
-                "tool_calls": [
-                    {
-                        "index": index,
-                        "id": call["id"],
-                        "type": "function",
-                        "function": {"name": call["function"]["name"], "arguments": ""},
-                    }
-                ]
-            }
-        )
-        arguments = call["function"]["arguments"]
-        for offset in range(0, len(arguments), 1024):
-            yield event(
-                {
-                    "tool_calls": [
-                        {
-                            "index": index,
-                            "function": {"arguments": arguments[offset : offset + 1024]},
-                        }
-                    ]
-                }
-            )
-    yield event({}, response["choices"][0]["finish_reason"])
-    if include_usage and "usage" in response:
-        yield "data: " + compact({**base, "choices": [], "usage": response["usage"]}) + "\n\n"
-    if "bridge" in response:
-        # Extension metadata stays outside delta/tool arguments, preserving standard clients.
-        yield "data: " + compact({**base, "choices": [], "bridge": response["bridge"]}) + "\n\n"
-    yield "data: [DONE]\n\n"
+from .streaming import sse
 
 
 async def _watch_disconnect(request: Request) -> None:
+    """Wait for an ASGI disconnect after the request body has been consumed."""
     while True:
         if (await request.receive())["type"] == "http.disconnect":
             return
@@ -75,28 +30,42 @@ async def _watch_disconnect(request: Request) -> None:
 def create_app(
     settings: Settings | None = None, client_factory: ClientFactory | None = None
 ) -> FastAPI:
+    """Construct the local HTTP service without contacting the provider.
+
+    Args:
+        settings: Validated configuration; defaults are used when omitted.
+        client_factory: Optional SDK-client factory for tests or embedding.
+
+    Returns:
+        A FastAPI app exposing /healthz and /v1/chat/completions. Its
+        state.bridge attribute owns request orchestration and session state.
+    """
     config = settings or Settings()
     bridge = Bridge(config, Upstream(config, client_factory))
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        """Close diagnostic handlers when the application shuts down."""
         yield
         bridge.diagnostics.close()
 
-    app = FastAPI(title="LLM Tool Bridge", version=__version__, lifespan=lifespan)
+    app = FastAPI(title="NoRepoLeftBehind", version=__version__, lifespan=lifespan)
     app.state.bridge = bridge
 
     @app.exception_handler(BridgeError)
     async def bridge_error(request: Request, error: BridgeError) -> JSONResponse:
+        """Translate a sanitized bridge failure into the OpenAI error envelope."""
         bridge.diagnostics.record("error", status=error.status, code=error.code)
         return JSONResponse(status_code=error.status, content=error.payload())
 
     @app.get("/healthz")
     async def health() -> dict[str, str]:
+        """Report process health without checking provider availability."""
         return {"status": "ok"}
 
     @app.post("/v1/chat/completions", response_model=None)
     async def completions(request: Request) -> Any:
+        """Read a bounded request, monitor disconnects, and return validated JSON or SSE."""
         raw = bytearray()
         try:
             async for chunk in request.stream():

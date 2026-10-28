@@ -1,7 +1,7 @@
 """Opt-in live model evaluation via an already running middleware endpoint.
 
 Acts as a synthetic harness, supplying predefined tool results; never executes a tool.
-Credentials are read from LLM_BRIDGE_EVAL_TOKEN, not command-line arguments.
+Credentials are read from NOREPOLEFTBEHIND_EVAL_TOKEN, not command-line arguments.
 """
 
 import argparse
@@ -13,7 +13,7 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
-from llm_tool_bridge.protocol import compact
+from norepoleftbehind.protocol.chat import compact
 
 TOOLS = [
     {
@@ -33,9 +33,9 @@ TOOLS = [
 
 
 async def evaluate(base_url: str, models: list[str], repeats: int) -> dict[str, Any]:
-    token = os.environ.get("LLM_BRIDGE_EVAL_TOKEN")
+    token = os.environ.get("NOREPOLEFTBEHIND_EVAL_TOKEN")
     if not token:
-        raise SystemExit("Set LLM_BRIDGE_EVAL_TOKEN; this command makes live model requests")
+        raise SystemExit("Set NOREPOLEFTBEHIND_EVAL_TOKEN; this command makes live model requests")
     reports: dict[str, Any] = {}
     for model in models:
         counters = {

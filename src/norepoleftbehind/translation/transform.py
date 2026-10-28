@@ -1,15 +1,18 @@
+"""Render supplied conversation history into the configured upstream request format."""
+
 import math
 from copy import deepcopy
 from typing import Any
 
-from .config import Settings
-from .errors import BridgeError
-from .pointers import remove
-from .prompts import tool_prompt
-from .protocol import ToolPolicy, compact, text_content
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import ToolPolicy, compact, text_content
+from norepoleftbehind.protocol.errors import BridgeError
+from norepoleftbehind.protocol.pointers import remove
+from norepoleftbehind.translation.prompts import tool_prompt
 
 
 def budget(body: dict[str, Any], settings: Settings) -> None:
+    """Enforce transformed prompt bytes and an optional explicitly approximate token preflight."""
     prompt_bytes = len(
         compact(
             {
@@ -40,6 +43,18 @@ def transform(
     policy: ToolPolicy,
     delta: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
+    """Copy a validated request and render history, instructions, and tools for the provider.
+
+    Args:
+        original: Full request supplied by the harness; never modified in place.
+        settings: Effective profile controlling injection and preservation.
+        policy: Current tool definitions and calling restrictions.
+        delta: Optional unseen turns for a verified provider continuation.
+
+    Returns:
+        A budget-checked upstream payload with bridge-only fields removed.
+        Full instructions and tools can be reinjected even when history is a delta.
+    """
     body = deepcopy(original)
     remove(body, settings.cloud_context.request_id_pointer)
     remove(body, settings.cloud_context.session_id_body_pointer)
@@ -90,6 +105,8 @@ def transform(
     blocks = []
     if settings.tools_mode == "prompt_and_translate" and policy.schemas:
         blocks.append(tool_prompt(policy, original["model"], settings))
+    if settings.skill_prompt:
+        blocks.append("AVAILABLE_SKILLS_GUIDANCE\n" + settings.skill_prompt)
     if settings.instructions == "inject" and instructions:
         blocks.append("SYSTEM_AND_DEVELOPER_INSTRUCTIONS\n" + compact(instructions))
     if settings.history_mode == "flatten":

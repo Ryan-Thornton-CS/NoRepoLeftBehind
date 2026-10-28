@@ -12,10 +12,10 @@ import httpx
 from fastapi import FastAPI, Request
 from openai import AsyncOpenAI
 
-from llm_tool_bridge.app import create_app
-from llm_tool_bridge.config import Settings
-from llm_tool_bridge.protocol import ToolPolicy
-from llm_tool_bridge.transform import transform
+from norepoleftbehind.api.app import create_app
+from norepoleftbehind.configuration.models import Settings
+from norepoleftbehind.protocol.chat import ToolPolicy
+from norepoleftbehind.translation.transform import transform
 
 
 async def benchmark(count: int, concurrency: int, prompt_bytes: int, delay: float) -> dict:
