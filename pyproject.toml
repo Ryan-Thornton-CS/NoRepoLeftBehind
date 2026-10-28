@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "llm-tool-bridge"
+version = "0.1.0"
+description = "Local OpenAI-compatible tool prompt and translation middleware"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+dependencies = [
+  "fastapi>=0.115,<1",
+  "uvicorn>=0.34,<1",
+  "pydantic>=2.10,<3",
+  "openai>=2,<3",
+  "jsonschema>=4.23,<5",
+  "PyYAML>=6,<7",
+]
+
+[project.scripts]
+llm-tool-bridge = "llm_tool_bridge.cli:main"
+
+[dependency-groups]
+dev = [
+  "pytest>=8,<10", "pytest-asyncio>=0.25,<2", "httpx>=0.28,<1",
+  "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6,<7",
+  "types-jsonschema>=4,<5", "build>=1,<2",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/llm_tool_bridge"]
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "examples", "scripts", "README.md", "LICENSE", "pyproject.toml", "uv.lock"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+check_untyped_defs = true
+disallow_untyped_defs = true
+warn_unused_ignores = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]

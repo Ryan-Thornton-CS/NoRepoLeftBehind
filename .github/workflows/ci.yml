@@ -1,0 +1,42 @@
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ['3.12', '3.13', '3.14']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked --dev
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy
+      - run: uv run pytest
+      - run: uv build
+      - name: Check built wheel in a fresh environment
+        run: |
+          uv venv /tmp/bridge-wheel
+          uv pip install --python /tmp/bridge-wheel/bin/python dist/*.whl
+          /tmp/bridge-wheel/bin/llm-tool-bridge --version
+          /tmp/bridge-wheel/bin/llm-tool-bridge validate --config examples/bridge.yaml
+          /tmp/bridge-wheel/bin/llm-tool-bridge diagnostics
+          uv run python scripts/smoke_install.py /tmp/bridge-wheel/bin/llm-tool-bridge
+      - name: Check source distribution
+        run: |
+          uv venv /tmp/bridge-sdist
+          uv pip install --python /tmp/bridge-sdist/bin/python dist/*.tar.gz
+          /tmp/bridge-sdist/bin/llm-tool-bridge diagnostics
